@@ -1,0 +1,377 @@
+---
+title: "36469 Final Project"
+author: "Jerry Li (jerryl) and Raymond Li (rli3)"
+date: "12/6/2021"
+output: pdf_document
+geometry: margin=1in
+header-includes:
+  - \usepackage{xcolor}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(glmnet)
+library(xgboost)
+library(MASS)
+library(PMA)
+library(kableExtra)
+source("https://raw.githubusercontent.com/xuranw/469_public/master/hw6/hw6_functions.R")
+```
+
+# Data
+The Zeisel dataset collects data on RNA sequencing for 3005 mouse cells across 1000 genes. 
+
+```{r echo=FALSE}
+tmp <- read.csv("zeigel.csv", row.names=1)
+expr_mat <- as.matrix(tmp[,-1])
+cell_types <- as.factor(tmp[,1])
+table(cell_types) #format into nicer table
+```
+
+We see that the dataset contains 7 types of labelled cells, with pyramidal CA1 being the most common and microglia being the least common.
+
+```{r include = FALSE}
+ctype_list = c("astrocytes_ependymal", "endothelial-mural", "interneurons", 
+               "microglia", "oligodendrocytes", "pyramidal CA1", "pyramidal SS")
+
+colors = c("blue", "green", "red", "black", "yellow", "orange", "purple")
+
+colorize = function(ctype){
+  color = rep(NA, length=K)
+  color[which(ctype=="astrocytes_ependymal")] = "blue"
+  color[which(ctype=="endothelial-mural")] = "green"
+  color[which(ctype=="interneurons")] = "red"
+  color[which(ctype=="microglia")] = "black"
+  color[which(ctype=="oligodendrocytes")] = "yellow"
+  color[which(ctype=="pyramidal CA1")] = "orange"
+  color[which(ctype=="pyramidal SS")] = "purple"
+  return(color)
+}
+```
+
+# PCA Clustering Analysis
+```{r, echo=FALSE, warning=FALSE}
+normalize <- function(x){
+  S = sum(x)
+  x = x / S
+  return(x * (10^4))
+}
+expr_mat <- t(apply(expr_mat, 1, normalize))
+expr_mat <- log2(expr_mat + 1)
+expr_mat <- scale(expr_mat)
+```
+
+
+*Part B*
+
+```{r, include=FALSE, cache=TRUE}
+pc <- prcomp(expr_mat, center=T, scale.=T)
+expr_pca <- pc$x[, 1:4]
+expr_pca <- scale(expr_pca)
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(1,2))
+
+plot(1:1000, pc$sdev, pch=20, main = "Scree plot of full data",
+                             xlab = "Index of principal component",
+                             ylab = "Square root of eigenvalues")
+colors <- rep(NA, length=1000)
+colors[which(cell_types == "astrocytes_ependymal")] = "black"
+colors[which(cell_types == "endothelial-mural")] = "green"
+colors[which(cell_types == "interneurons")] = "red"
+colors[which(cell_types == "microglia")] = "blue"
+colors[which(cell_types == "oligodendrocytes")] = "purple"
+colors[which(cell_types == "pyramidal CA1")] = "orange"
+colors[which(cell_types == "pyramidal SS")] = "yellow"
+plot(expr_pca[, 1], expr_pca[, 2], col=colors, pch=20, ylim = c(-5, 15), main = "Visualizing data (True clusters, full data)",
+                                                                         xlab = "First principal component",
+                                                                         ylab = "Second principal component")
+
+legend("bottomleft", inset=.02, c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia", 
+                                  "oligodendrocytes", "pyramidal CA1", "pyramidal SS"),
+                                fill=c("black", "red", "green", "blue", "purple", "orange", "yellow"), cex=0.8, bty="n")
+
+```
+
+The scree plot shows four main outlier points on the upper left, where the eiganvalues are higher than those of the rest of the data. Because of this, it seems reasonable to only find the first four principal component values.
+
+The data showed by the scatterplot indicates the first two principal components is not enough to differentiate between the cell types. It looks like all four cell types are in the same cluster with the exception of one data point outlier. However, four cell types should have four distinct clusters.
+
+*Part C*
+
+```{r, echo=FALSE}
+set.seed(46)
+conf_matrix <- kmeans(expr_mat, centers=7)
+table(conf_matrix$cluster, cell_types)
+```
+
+
+```{r}
+compute_misclustering_rate(cell_types, conf_matrix$cluster)
+```
+
+Based on the reported results, the quality of the estimated clustering seems mediocre. While the misclustering rate is just 17 percent, cluster 2 isn't matched to a cell. On the other hand, cluster 4 is matched with two cell types.
+
+*Part D*
+
+```{r, echo=FALSE}
+set.seed(46)
+conf_matrix_d <- kmeans(expr_pca, centers=7)
+table(conf_matrix_d$cluster, cell_types)
+```
+
+```{r}
+length(cell_types)
+length(conf_matrix_d$cluster)
+compute_misclustering_rate(cell_types, conf_matrix_d$cluster)
+```
+
+```{r, echo=FALSE}
+colors <- rep(NA, length=1000)
+colors[which(cell_types == "astrocytes_ependymal")] = "black"
+colors[which(cell_types == "endothelial-mural")] = "green"
+colors[which(cell_types == "interneurons")] = "red"
+colors[which(cell_types == "microglia")] = "blue"
+colors[which(cell_types == "oligodendrocytes")] = "purple"
+colors[which(cell_types == "pyramidal CA1")] = "orange"
+colors[which(cell_types == "pyramidal SS")] = "yellow"
+
+plot(expr_pca[, 1], expr_pca[, 2], col=colors, pch=20, ylim = c(-5, 10), main = "Visualizing data (Est. clusters, full data)",
+                                                                         xlab = "First principal component",
+                                                                         ylab = "Second principal component")
+```
+
+When comparing with Figure 2, the scatterplot gives a better result, but barely. It seems like the red cluster (group 3) is clearly defined, but the other three interact with eachother too much to be distinguisable.
+
+The matrix and the misclustering rate, on the other hand, indicates a solid clustering. The matrix shows all four clusters are paired mostly with a unique cell type. The misclustering rate is 6.7%, much lower than the previous rate from part C.
+
+*Part E*
+```{r, cache=TRUE, echo=FALSE}
+# dont run this again lol 
+set.seed(46)
+spca_cv_res <- SPC.cv(expr_mat, sumabsvs = seq(1.2, sqrt(ncol(expr_mat))/2, length.out = 10))
+```
+
+```{r, include=FALSE, cache=TRUE}
+spca_res <- SPC(expr_mat, sumabsv = spca_cv_res$bestsumabsv1se, K=7) # k changed from 4
+gene_idx <- which(t(spca_res$v)!=0)%/%7 # changed from 4
+expr_mat_screened <- scale(expr_mat[, gene_idx])
+```
+
+*Part F*
+
+```{r, echo=FALSE, cache=TRUE}
+set.seed(46)
+expr_spca <- prcomp(expr_mat_screened, center=T, scale.=T)$x[, 1:4]
+expr_spca <- scale(expr_spca)
+conf_matrix_f = kmeans(expr_spca, centers=7)
+table(conf_matrix_f$cluster, cell_types)
+```
+
+```{r}
+compute_misclustering_rate(cell_types, conf_matrix_f$cluster)
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(1,2))
+colors <- rep(NA, length=1000)
+colors[which(cell_types == "astrocytes_ependymal")] = "black"
+colors[which(cell_types == "endothelial-mural")] = "green"
+colors[which(cell_types == "interneurons")] = "red"
+colors[which(cell_types == "microglia")] = "blue"
+colors[which(cell_types == "oligodendrocytes")] = "purple"
+colors[which(cell_types == "pyramidal CA1")] = "orange"
+colors[which(cell_types == "pyramidal SS")] = "yellow"
+plot(expr_spca[, 1], expr_spca[, 2], col=colors, pch=20, main = "Visualizing data (True clusters, screened data)",
+                                                         xlab = "First principal component",
+                                                         ylab = "Second principal component")
+legend("bottomleft", inset=.02, c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia", 
+                                  "oligodendrocytes", "pyramidal CA1", "pyramidal SS"),
+                                fill=c("black", "red", "green", "blue", "purple", "orange", "yellow"), cex=0.8, bty="n")
+colors <- rep(NA, length=1000)
+colors[which(cell_types == "astrocytes_ependymal")] = "black"
+colors[which(cell_types == "endothelial-mural")] = "green"
+colors[which(cell_types == "interneurons")] = "red"
+colors[which(cell_types == "microglia")] = "blue"
+colors[which(cell_types == "oligodendrocytes")] = "purple"
+colors[which(cell_types == "pyramidal CA1")] = "orange"
+colors[which(cell_types == "pyramidal SS")] = "yellow"
+plot(expr_spca[, 1], expr_spca[, 2], col=colors, pch=19, main = "Visualizing data (Est. clusters, screened data)",
+                                                          xlab = "First principal component",
+                                                          ylab = "Second principal component")
+```
+
+Using Sparce PCA yields better results compared to the clustering seen in 1B and 1C. Since the features are correlated with eachother, sPCA is beneficial by providing high factor loadings. The result is the opposite from what we have seen, where the data points are possible too sparce and does not cluster- rather than clustering too close and being indistingishable from eachother.
+
+On the other hand, the matrix and misclustering rate is still not great- the matrix shows cluster 3 containing two cell types. The misclustering rate is 19.4%, higher than previously seen.
+
+
+
+
+
+# XGBoost Classification
+```{r include=FALSE}
+library(xgboost)
+```
+
+XGBoost is a powerful classification model that uses gradient boosting to outperform many other algorithms for classification. 
+
+```{r include=FALSE}
+set.seed(10)
+n = nrow(tmp)
+#labels must be [0:n)
+labels = as.integer(factor(cell_types, levels=c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS"), labels=1:7))-1
+train.index = sample(n,floor(0.75*n))
+train.data = as.matrix(expr_mat[train.index,])
+train.label = labels[train.index]
+test.data = as.matrix(expr_mat[-train.index,])
+test.label = labels[-train.index]
+```
+
+As aforementioned, the full Zeisel dataset collects data on 3005 mouse cells. To conduct XGBoost classification, we first randomly split the data into training (75%) and testing (25%), i.e. Leave-One-Out Cross Validation (LOOCV), which will allow us to verify the model's findings. 
+
+```{r include = FALSE}
+# Transform the two data sets into xgb.Matrix
+xgb.train = xgb.DMatrix(data=train.data,label=train.label)
+xgb.test = xgb.DMatrix(data=test.data,label=test.label)
+
+# Define the parameters for multinomial classification
+num_class = length(levels(cell_types))
+params = list(
+  booster="gbtree",
+  eta=0.001,
+  max_depth=5,
+  gamma=3,
+  subsample=0.75,
+  colsample_bytree=1,
+  objective="multi:softprob",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+```
+
+```{r echo=FALSE, message=FALSE}
+# Train the XGBoost classifer
+xgb.fit=xgb.train(
+  params=params,
+  data=xgb.train,
+  nrounds=20,
+  nthreads=1)
+
+# Review the final model and results
+xgb.fit
+```
+
+```{r include=FALSE}
+xgb.pred = as.data.frame(predict(xgb.fit, train.data, reshape=T))
+colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
+
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[train.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Training Error =",sprintf("%1.2f%%", 100*result)))
+
+xgb.pred = as.data.frame(predict(xgb.fit, test.data, reshape=T))
+colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
+
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[test.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Testing Error =",sprintf("%1.2f%%", 100*result)))
+```
+
+We fit this XGBoost model with a learning rate of 0.001, gamma value of 3, and max depth of 5 to prevent overfitting by making the boosting process more conservative. The booster ran for 20 rounds on the training dataset using the `multi:softprob` model, which predicts probabilities that an observation falls into each of the 7 cell types. This makes use of the softmax objective function, which is described as:
+
+$$\sigma(\overrightarrow{z})_j=\frac{e^{z_j}}{\sum_{k=1}^Ke^{z_k}}$$
+
+The final accuracy of this model was quite high with a training error of 2.09% and testing error of 5.98%, which are both incredibly low. We can further visualize the model's decisions in the figure below, which shows the top 8 most important features in the model. The `Crym`, `Slc32a1`, `Mobp`, `Mbp`, and `Mef2c` genes stand out as the features that produce the highest information gain, suggesting that they are most important in determining cell type.  
+
+![](Importance 1.png)
+
+```{r eval=FALSE}
+xgb.plot.importance(importance_matrix=xgb.importance(model=xgb.fit),
+                    top_n=8,
+                    xlab="Importance (Gain)",
+                    ylab="Feature",
+                    main="Top 8 Most Important Features in Model")
+
+```
+
+The first XGBoost decision tree is shown below--we can see that some of the most important features are indeed used in this tree. 
+
+![](Tree 1.png)
+
+```{r eval=FALSE}
+library(DiagrammeR)
+xgb.plot.tree(model=xgb.fit,trees=1)
+```
+
+However, despite the fact that the training and testing error are both small and have a marginal difference, the testing error is higher than the training error. In addition, the tree supports this idea that the model may be overfitting, as there seem to be a high number of splits and some that seem almost arbitrary. Thus, we may choose to add an L2 regularization term of 0.1 to smooth parameters toward 0 and avoid overfitting.
+
+```{r echo=FALSE, message=FALSE}
+# Train the XGBoost classifer
+xgb.fit=xgb.train(
+  params=params,
+  data=xgb.train,
+  nrounds=20,
+  nthreads=1,
+  lambda=0.1)
+
+# Review the final model and results
+xgb.fit
+```
+
+```{r include=FALSE}
+xgb.pred = as.data.frame(predict(xgb.fit, train.data, reshape=T))
+colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
+
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[train.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Training Error =",sprintf("%1.2f%%", 100*result)))
+
+xgb.pred = as.data.frame(predict(xgb.fit, test.data, reshape=T))
+colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
+
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[test.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Testing Error =",sprintf("%1.2f%%", 100*result)))
+```
+
+Interestingly, including L2 regularization produced a more significant difference between training and testing error--we see that training error is now 1.46% whereas testing error is 5.98%. While this regularization attempt has failed, it is nonetheless interesting to analyze the differences between the two models.
+
+Visualizing the most important features, we observe that some of the top 8 have changed between the two models. This may be because some features that are included at many lower splits which would provide more information are now penalized, thereby reducing their importance in the regularized model.
+
+![](Importance 2.png)
+
+```{r eval=FALSE}
+xgb.plot.importance(importance_matrix=xgb.importance(model=xgb.fit),
+                    top_n=8,
+                    xlab="Importance (Gain)",
+                    ylab="Feature",
+                    main="Top 8 Most Important Features in Model")
+
+```
+
+The first decision tree, as shown below, is also interesting--the number of splits seems to have increased, if anything, as compared to the non-regularized model. However, this may be explained by the coefficients on each feature shrinking toward 0 and not necessarily being altogether eliminated from the model, which would be the case with L1 regularization.
+
+![](Tree 2.png)
+
+```{r eval=FALSE}
+library(DiagrammeR)
+xgb.plot.tree(model=xgb.fit,trees=1)
+```
