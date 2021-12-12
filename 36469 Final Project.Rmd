@@ -62,20 +62,19 @@ expr_mat <- scale(expr_mat)
 ```
 
 
-*Part B*
-
 ```{r, include=FALSE, cache=TRUE}
 pc <- prcomp(expr_mat, center=T, scale.=T)
 expr_pca <- pc$x[, 1:4]
 expr_pca <- scale(expr_pca)
 ```
 
-```{r, echo=FALSE}
-par(mfrow=c(1,2))
-
+```{r, echo=FALSE, fig.width=6}
 plot(1:1000, pc$sdev, pch=20, main = "Scree plot of full data",
                              xlab = "Index of principal component",
                              ylab = "Square root of eigenvalues")
+```
+
+```{r, fig.width=6}
 colors <- rep(NA, length=1000)
 colors[which(cell_types == "astrocytes_ependymal")] = "black"
 colors[which(cell_types == "endothelial-mural")] = "green"
@@ -94,59 +93,54 @@ legend("bottomleft", inset=.02, c("astrocytes_ependymal", "endothelial-mural", "
 
 ```
 
-The scree plot shows four main outlier points on the upper left, where the eiganvalues are higher than those of the rest of the data. Because of this, it seems reasonable to only find the first four principal component values.
+The scree plot shows about 10 points that may be considered "outliers", as they are disconnected from the rest of the lines. This indicates we most likely do not need to use beyond the first ten principle components, but we may choose to use fewer than ten.
 
-The data showed by the scatterplot indicates the first two principal components is not enough to differentiate between the cell types. It looks like all four cell types are in the same cluster with the exception of one data point outlier. However, four cell types should have four distinct clusters.
+The cluster graph shows three out of the seven cell types (pyramidal CA1, interneurons, oligodendrocytes) placed in a visible cluster. The astrocytes_ependymol (in black) also appears to be clustered in a group, but is overshadowed by the green-colored group- and it's hard to distinguish the two. The three remaining groups looks to be quite scattered. However, that may just be due to the limitation of the data set. For example, certain cell types of 10x more data points than other cell types.
 
-*Part C*
 
 ```{r, echo=FALSE}
+# euclidian k means w/ matrix
 set.seed(46)
 conf_matrix <- kmeans(expr_mat, centers=7)
 table(conf_matrix$cluster, cell_types)
-```
-
-
-```{r}
 compute_misclustering_rate(cell_types, conf_matrix$cluster)
 ```
 
-Based on the reported results, the quality of the estimated clustering seems mediocre. While the misclustering rate is just 17 percent, cluster 2 isn't matched to a cell. On the other hand, cluster 4 is matched with two cell types.
-
-*Part D*
+Using the normal euclidean distance k-means on the expression matrix, it seems like cell groups 4-7 are classified really well. However, groups 1-3 have two or three decently large groups of cell types. Groups 1 (pyramidal CA1, pyramdial SS) and 3 (endothelilal-mural, microglia) seems to especially have a hard time clustering one cell type in its grouping. Pyramidal CA1 cells also have very large groupings in both groups 1 and 5. The mis-calculation rate for this analysis is 26.6%.
 
 ```{r, echo=FALSE}
+# sphereical k means w/ matrix
+set.seed(46)
+conf_matrix_sphere <- skmeans(expr_mat, 7)
+table(conf_matrix_sphere$cluster, cell_types)
+compute_misclustering_rate(cell_types, conf_matrix_sphere$cluster)
+```
+
+Using the spherical distance k-means on the expression matrix, it seems like all cell groups with the exception of group 4 was clustered relatively well, balancing between endothelial-mural and microglia type cells. Going down the columns, it seems like all cell types were grouped pretty well too, with the exception of pyramidal CA1- splitting its instances between groups 2 and 5. Even though the misclustering rate is 25% (marginal statistical improvement), the eye test shows much improvement when switching over to the spherical distance formula.
+
+```{r, echo=FALSE}
+# euclidian k means w/ pca
 set.seed(46)
 conf_matrix_d <- kmeans(expr_pca, centers=7)
 table(conf_matrix_d$cluster, cell_types)
-```
-
-```{r}
-length(cell_types)
-length(conf_matrix_d$cluster)
 compute_misclustering_rate(cell_types, conf_matrix_d$cluster)
 ```
 
-```{r, echo=FALSE}
-colors <- rep(NA, length=1000)
-colors[which(cell_types == "astrocytes_ependymal")] = "black"
-colors[which(cell_types == "endothelial-mural")] = "green"
-colors[which(cell_types == "interneurons")] = "red"
-colors[which(cell_types == "microglia")] = "blue"
-colors[which(cell_types == "oligodendrocytes")] = "purple"
-colors[which(cell_types == "pyramidal CA1")] = "orange"
-colors[which(cell_types == "pyramidal SS")] = "yellow"
+Using the default euclidean distance k-means on the expression PCA calculations, it looks like groups 3 and 6 are clustered solidly. All other groups have a decently large proportion of at least two cell-types. And going down the cell types, the first four are grouped well. However, oligodendrocytes, pyramidal CA1, and pyramidal SS cell types are split among multiple cell groups. The misclustering rate for this analysis is 36.8%.
 
-plot(expr_pca[, 1], expr_pca[, 2], col=colors, pch=20, ylim = c(-5, 10), main = "Visualizing data (Est. clusters, full data)",
-                                                                         xlab = "First principal component",
-                                                                         ylab = "Second principal component")
+```{r}
+# sphereical k means w/ pca
+set.seed(46)
+conf_matrix_d_sphere <- skmeans(expr_pca, 7)
+table(conf_matrix_d_sphere$cluster, cell_types)
+compute_misclustering_rate(cell_types, conf_matrix_d_sphere$cluster)
 ```
 
-When comparing with Figure 2, the scatterplot gives a better result, but barely. It seems like the red cluster (group 3) is clearly defined, but the other three interact with eachother too much to be distinguisable.
+Using the spherical distance k-means on the expression PCA calculations, it looks like only group 6 is clostly associate with a cell type- meaning there is a good chance it is being overfit. Other groups have a solid proportion of three to four different cell types. And looking at the cell types, astrocytes_ependymal, endothelial-mural, and microglia cell types looks like they are closely associated with a grouping. The other cell types are not. The miscalculation rate here is 35.3% Compared to the default distance formula, the misclustering rate shows a marginal improvement However the table does not indicate a major benefit in terms of better clustering, and in some aspects, even looks worse than before.
 
-The matrix and the misclustering rate, on the other hand, indicates a solid clustering. The matrix shows all four clusters are paired mostly with a unique cell type. The misclustering rate is 6.7%, much lower than the previous rate from part C.
+Overall, the PCA calculations hold a higher miscalculation rate from just the matrix, regardless of which distance formula is used. When switching over to the spherical distance formula, there is an improvement in the miscalculation rate. However, the results of the tables are mixed, showing improvements at times and no improvements at other times.
 
-*Part E*
+
 ```{r, cache=TRUE, echo=FALSE}
 # dont run this again lol 
 set.seed(46)
@@ -159,7 +153,6 @@ gene_idx <- which(t(spca_res$v)!=0)%/%7 # changed from 4
 expr_mat_screened <- scale(expr_mat[, gene_idx])
 ```
 
-*Part F*
 
 ```{r, echo=FALSE, cache=TRUE}
 set.seed(46)
@@ -167,14 +160,19 @@ expr_spca <- prcomp(expr_mat_screened, center=T, scale.=T)$x[, 1:4]
 expr_spca <- scale(expr_spca)
 conf_matrix_f = kmeans(expr_spca, centers=7)
 table(conf_matrix_f$cluster, cell_types)
-```
-
-```{r}
 compute_misclustering_rate(cell_types, conf_matrix_f$cluster)
 ```
 
+```{r}
+set.seed(46)
+conf_matrix_f_sphere = skmeans(expr_spca, 7)
+table(conf_matrix_f_sphere$cluster, cell_types)
+compute_misclustering_rate(cell_types, conf_matrix_f_sphere$cluster)
+```
+
+When using the sparse PCA calculations applied to both the euclidean distance and the spherical distance, the miscalculation rate improves marginally (32.9%, 32.8%). However, this time, there is no noticeable improvement between the two distance formulas. When viewing the tables, in both cases it seems like half of the cell groups are classified well, and the other half is not. Overall the table does not indicate improvement between distance types or sparse PCA vs vanilla PCA. That being said, based on the formula applied in HW6, there seems to be a mathematical improvement when moving to sparse PCA.
+
 ```{r, echo=FALSE}
-par(mfrow=c(1,2))
 colors <- rep(NA, length=1000)
 colors[which(cell_types == "astrocytes_ependymal")] = "black"
 colors[which(cell_types == "endothelial-mural")] = "green"
@@ -189,24 +187,8 @@ plot(expr_spca[, 1], expr_spca[, 2], col=colors, pch=20, main = "Visualizing dat
 legend("bottomleft", inset=.02, c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia", 
                                   "oligodendrocytes", "pyramidal CA1", "pyramidal SS"),
                                 fill=c("black", "red", "green", "blue", "purple", "orange", "yellow"), cex=0.8, bty="n")
-colors <- rep(NA, length=1000)
-colors[which(cell_types == "astrocytes_ependymal")] = "black"
-colors[which(cell_types == "endothelial-mural")] = "green"
-colors[which(cell_types == "interneurons")] = "red"
-colors[which(cell_types == "microglia")] = "blue"
-colors[which(cell_types == "oligodendrocytes")] = "purple"
-colors[which(cell_types == "pyramidal CA1")] = "orange"
-colors[which(cell_types == "pyramidal SS")] = "yellow"
-plot(expr_spca[, 1], expr_spca[, 2], col=colors, pch=19, main = "Visualizing data (Est. clusters, screened data)",
-                                                          xlab = "First principal component",
-                                                          ylab = "Second principal component")
 ```
-
-Using Sparce PCA yields better results compared to the clustering seen in 1B and 1C. Since the features are correlated with eachother, sPCA is beneficial by providing high factor loadings. The result is the opposite from what we have seen, where the data points are possible too sparce and does not cluster- rather than clustering too close and being indistingishable from eachother.
-
-On the other hand, the matrix and misclustering rate is still not great- the matrix shows cluster 3 containing two cell types. The misclustering rate is 19.4%, higher than previously seen.
-
-
+Now viewing the classification plot when using sparse PCA, there does seem to be an improvement from before. The most noticable aspect is the black group (astrocytes_ependymal) clearly being separated from the green (interneurons). Other than that, the orange, purple, and green are still distinct. The blue (microglia) group is still very scattered and not clustered at all. However, that may again be due to its small sample size. Interestingly, the red (endothelial-mural) and yellow (pyramidal SS) groups look like they are clustered, but are hidden behind the orange clusters. In any case, it does not appear that the three groups have a great separation from each other.
 
 
 
