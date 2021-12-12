@@ -18,6 +18,14 @@ library(kableExtra)
 source("https://raw.githubusercontent.com/xuranw/469_public/master/hw6/hw6_functions.R")
 ```
 
+# Introduction
+
+The data set being used for this analysis is the Zeisel data set. The data set contains single cell RNA sequencing data, including gene expression data for thousands of genes and cell type labels. Altogether, the data set has 3005 observations (rows) of 1002 attributes (columns). A preliminary importing task involved setting the row name to the cell name rather than the row indices, making the total number of columns 1001. When performing group-bys, the data set contains seven cell types: astrocytes_ependymal, endothelial-mural, interneurons, microglia, oligodendrocytes, pyramidal CA1, and pyramidal SS. The smallest group is microglia, which contains 98 cells, and the largest, pyramidal CA1, which contains 939 cells. This reference information is useful because when we do our classification, we will have a rough idea of how many separate clusters to expect, as well as the relative size of each cluster.
+
+As mentioned, the Zeisel data set is most compatible with clustering analysis. In this report, two types of clustering will be done. The first is k-means clustering of the seven cell types. With this strategy, both naive and sparse k-means will be done and the results will be compared. Since there are so many genes to cluster within seven cell groups, it is interesting to see if the sparse k-means clustering does a better job dividing the output into seven distinct groups, like we expect it to. An additional wrinkle with k-means is that by default, the euclidean distance is used to find the distances between points. A spherical k-means clustering will also be used and compared in the naive run. However, due to the time it takes to calculate the sparse PCA, it will not be feasible to apply the formula to both the euclidean and the spherical formulas.
+
+The second type of analysis is using the XGBoost package in R (extreme gradient boosting). The package supports many different types of functions, but the method to be used here will be tree learning for classification purposes. The goal of the second analysis is to view which gene is the most important for various cell groups- by volume of occurrence. In addition, cell types will also be predicted based on the known rate of occurrences of certain genes. The two iterations run here are the basic run (with parameters filled in with commonly accepted values) and a run with an added parameter L2 regularization with a value of 0.1. The theoretical objective of adding this new parameter is to lower variance, while increasing bias. This is a common way to counter overfitting of the model. The results of the two runs are compared.
+
 # Data
 The Zeisel dataset collects data on RNA sequencing for 3005 mouse cells across 1000 genes. 
 
