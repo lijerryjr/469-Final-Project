@@ -1,31 +1,37 @@
 ---
 title: "36469 Final Project"
 author: "Jerry Li (jerryl) and Raymond Li (rli3)"
-date: "12/6/2021"
+date: "12/12/2021"
 output: pdf_document
 geometry: margin=1in
-header-includes:
-  - \usepackage{xcolor}
 ---
+\fontfamily{cmr}
+\fontsize{12}{22}
+\selectfont
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 library(glmnet)
 library(xgboost)
 library(MASS)
 library(PMA)
-library(kableExtra)
+library(skmeans)
 source("https://raw.githubusercontent.com/xuranw/469_public/master/hw6/hw6_functions.R")
 ```
 
-# Data
-The Zeisel dataset collects data on RNA sequencing for 3005 mouse cells across 1000 genes. 
+# Introduction
+
+The data set being used for this analysis is the Zeisel data set. The data set contains single cell RNA sequencing data, including gene expression data for thousands of genes and cell type labels. Altogether, the data set has 3005 observations (rows) of 1002 attributes (columns). A preliminary importing task involved setting the row name to the cell name rather than the row indices, making the total number of columns 1001. When performing group-bys, the data set contains seven cell types: astrocytes_ependymal, endothelial-mural, interneurons, microglia, oligodendrocytes, pyramidal CA1, and pyramidal SS. The smallest group is microglia, which contains 98 cells, and the largest, pyramidal CA1, which contains 939 cells. This reference information is useful because when we do our classification, we will have a rough idea of how many separate clusters to expect, as well as the relative size of each cluster.
+
+As mentioned, the Zeisel data set is most compatible with clustering analysis. In this report, two types of clustering will be done. The first is k-means clustering of the seven cell types. With this strategy, both naive and sparse k-means will be done and the results will be compared. Since there are so many genes to cluster within seven cell groups, it is interesting to see if the sparse k-means clustering does a better job dividing the output into seven distinct groups, like we expect it to. An additional wrinkle with k-means is that by default, the euclidean distance is used to find the distances between points. A spherical k-means clustering will also be used and compared in the naive run. However, due to the time it takes to calculate the sparse PCA, it will not be feasible to apply the formula to both the euclidean and the spherical formulas.
+
+The second type of analysis is using the XGBoost package in R (extreme gradient boosting). The package supports many different types of functions, but the method to be used here will be tree learning for classification purposes. The goal of the second analysis is to view which gene is the most important for various cell groups- by volume of occurrence. In addition, cell types will also be predicted based on the known rate of occurrences of certain genes. The two iterations run here are the basic run (with parameters filled in with commonly accepted values) and a run with an added parameter L2 regularization with a value of 0.1. The theoretical objective of adding this new parameter is to lower variance, while increasing bias. This is a common way to counter overfitting of the model. The results of the two runs are compared.
 
 ```{r echo=FALSE}
 tmp <- read.csv("zeigel.csv", row.names=1)
 expr_mat <- as.matrix(tmp[,-1])
 cell_types <- as.factor(tmp[,1])
-table(cell_types) #format into nicer table
+table(cell_types)
 ```
 
 We see that the dataset contains 7 types of labelled cells, with pyramidal CA1 being the most common and microglia being the least common.
@@ -48,8 +54,8 @@ colorize = function(ctype){
   return(color)
 }
 ```
-
-# PCA Clustering Analysis
+# Results
+## PCA Clustering Analysis
 ```{r, echo=FALSE, warning=FALSE}
 normalize <- function(x){
   S = sum(x)
@@ -60,9 +66,6 @@ expr_mat <- t(apply(expr_mat, 1, normalize))
 expr_mat <- log2(expr_mat + 1)
 expr_mat <- scale(expr_mat)
 ```
-
-
-*Part B*
 
 ```{r, include=FALSE, cache=TRUE}
 pc <- prcomp(expr_mat, center=T, scale.=T)
@@ -94,72 +97,67 @@ legend("bottomleft", inset=.02, c("astrocytes_ependymal", "endothelial-mural", "
 
 ```
 
-The scree plot shows four main outlier points on the upper left, where the eiganvalues are higher than those of the rest of the data. Because of this, it seems reasonable to only find the first four principal component values.
+The scree plot shows about 10 points that may be considered "outliers", as they are disconnected from the rest of the lines. This indicates we most likely do not need to use beyond the first ten principle components, but we may choose to use fewer than ten.
 
-The data showed by the scatterplot indicates the first two principal components is not enough to differentiate between the cell types. It looks like all four cell types are in the same cluster with the exception of one data point outlier. However, four cell types should have four distinct clusters.
+The cluster graph shows three out of the seven cell types (pyramidal CA1, interneurons, oligodendrocytes) placed in a visible cluster. The astrocytes_ependymol (in black) also appears to be clustered in a group, but is overshadowed by the green-colored group- and it's hard to distinguish the two. The three remaining groups looks to be quite scattered. However, that may just be due to the limitation of the data set. For example, certain cell types of 10x more data points than other cell types.
 
-*Part C*
 
 ```{r, echo=FALSE}
+# euclidian k means w/ matrix
 set.seed(46)
 conf_matrix <- kmeans(expr_mat, centers=7)
 table(conf_matrix$cluster, cell_types)
-```
-
-
-```{r}
 compute_misclustering_rate(cell_types, conf_matrix$cluster)
 ```
 
-Based on the reported results, the quality of the estimated clustering seems mediocre. While the misclustering rate is just 17 percent, cluster 2 isn't matched to a cell. On the other hand, cluster 4 is matched with two cell types.
-
-*Part D*
+Using the normal euclidean distance k-means on the expression matrix, it seems like cell groups 4-7 are classified really well. However, groups 1-3 have two or three decently large groups of cell types. Groups 1 (pyramidal CA1, pyramdial SS) and 3 (endothelilal-mural, microglia) seems to especially have a hard time clustering one cell type in its grouping. Pyramidal CA1 cells also have very large groupings in both groups 1 and 5. The mis-calculation rate for this analysis is 26.6%.
 
 ```{r, echo=FALSE}
+# spherical k means w/ matrix
+set.seed(46)
+conf_matrix_sphere <- skmeans(expr_mat, 7)
+table(conf_matrix_sphere$cluster, cell_types)
+compute_misclustering_rate(cell_types, conf_matrix_sphere$cluster)
+```
+
+Using the spherical distance k-means on the expression matrix, it seems like all cell groups with the exception of group 4 was clustered relatively well, balancing between endothelial-mural and microglia type cells. Going down the columns, it seems like all cell types were grouped pretty well too, with the exception of pyramidal CA1- splitting its instances between groups 2 and 5. Even though the misclustering rate is 25% (marginal statistical improvement), the eye test shows much improvement when switching over to the spherical distance formula.
+
+```{r, echo=FALSE}
+# euclidian k means w/ pca
 set.seed(46)
 conf_matrix_d <- kmeans(expr_pca, centers=7)
 table(conf_matrix_d$cluster, cell_types)
-```
-
-```{r}
-length(cell_types)
-length(conf_matrix_d$cluster)
 compute_misclustering_rate(cell_types, conf_matrix_d$cluster)
 ```
 
-```{r, echo=FALSE}
-colors <- rep(NA, length=1000)
-colors[which(cell_types == "astrocytes_ependymal")] = "black"
-colors[which(cell_types == "endothelial-mural")] = "green"
-colors[which(cell_types == "interneurons")] = "red"
-colors[which(cell_types == "microglia")] = "blue"
-colors[which(cell_types == "oligodendrocytes")] = "purple"
-colors[which(cell_types == "pyramidal CA1")] = "orange"
-colors[which(cell_types == "pyramidal SS")] = "yellow"
+Using the default euclidean distance k-means on the expression PCA calculations, it looks like groups 3 and 6 are clustered solidly. All other groups have a decently large proportion of at least two cell-types. And going down the cell types, the first four are grouped well. However, oligodendrocytes, pyramidal CA1, and pyramidal SS cell types are split among multiple cell groups. The misclustering rate for this analysis is 36.8%.
 
-plot(expr_pca[, 1], expr_pca[, 2], col=colors, pch=20, ylim = c(-5, 10), main = "Visualizing data (Est. clusters, full data)",
-                                                                         xlab = "First principal component",
-                                                                         ylab = "Second principal component")
+```{r, echo=FALSE}
+# sphereical k means w/ pca
+set.seed(46)
+conf_matrix_d_sphere <- skmeans(expr_pca, 7)
+table(conf_matrix_d_sphere$cluster, cell_types)
+compute_misclustering_rate(cell_types, conf_matrix_d_sphere$cluster)
 ```
 
-When comparing with Figure 2, the scatterplot gives a better result, but barely. It seems like the red cluster (group 3) is clearly defined, but the other three interact with eachother too much to be distinguisable.
+Using the spherical distance k-means on the expression PCA calculations, it looks like only group 6 is closely associate with a cell type- meaning there is a good chance it is being overfit. Other groups have a solid proportion of three to four different cell types. And looking at the cell types, astrocytes_ependymal, endothelial-mural, and microglia cell types looks like they are closely associated with a grouping. The other cell types are not. The miscalculation rate here is 35.3% Compared to the default distance formula, the misclustering rate shows a marginal improvement However the table does not indicate a major benefit in terms of better clustering, and in some aspects, even looks worse than before.
 
-The matrix and the misclustering rate, on the other hand, indicates a solid clustering. The matrix shows all four clusters are paired mostly with a unique cell type. The misclustering rate is 6.7%, much lower than the previous rate from part C.
+Overall, the PCA calculations hold a higher miscalculation rate from just the matrix, regardless of which distance formula is used. When switching over to the spherical distance formula, there is an improvement in the miscalculation rate. However, the results of the tables are mixed, showing improvements at times and no improvements at other times.
 
-*Part E*
-```{r, cache=TRUE, echo=FALSE}
+
+```{r, cache=TRUE, echo=FALSE, eval=FALSE}
 # dont run this again lol 
 set.seed(46)
 spca_cv_res <- SPC.cv(expr_mat, sumabsvs = seq(1.2, sqrt(ncol(expr_mat))/2, length.out = 10))
 ```
 
 ```{r, include=FALSE, cache=TRUE}
-spca_res <- SPC(expr_mat, sumabsv = spca_cv_res$bestsumabsv1se, K=7) # k changed from 4
+#spca_res <- SPC(expr_mat, sumabsv = spca_cv_res$bestsumabsv1se, K=7) # k changed from 4
+spca_res <- SPC(expr_mat, sumabsv = 14.1879, K=7)
+#using value to avoid knitting issues
 gene_idx <- which(t(spca_res$v)!=0)%/%7 # changed from 4
 expr_mat_screened <- scale(expr_mat[, gene_idx])
 ```
-
-*Part F*
 
 ```{r, echo=FALSE, cache=TRUE}
 set.seed(46)
@@ -167,13 +165,21 @@ expr_spca <- prcomp(expr_mat_screened, center=T, scale.=T)$x[, 1:4]
 expr_spca <- scale(expr_spca)
 conf_matrix_f = kmeans(expr_spca, centers=7)
 table(conf_matrix_f$cluster, cell_types)
-```
-
-```{r}
 compute_misclustering_rate(cell_types, conf_matrix_f$cluster)
 ```
 
-```{r, echo=FALSE}
+```{r echo=FALSE}
+set.seed(46)
+conf_matrix_f_sphere = skmeans(expr_spca, 7)
+table(conf_matrix_f_sphere$cluster, cell_types)
+compute_misclustering_rate(cell_types, conf_matrix_f_sphere$cluster)
+```
+
+When using the sparse PCA calculations applied to both the euclidean distance and the spherical distance, the miscalculation rate improves marginally (32.9%, 32.8%). However, this time, there is no noticeable improvement between the two distance formulas. When viewing the tables, in both cases it seems like half of the cell groups are classified well, and the other half is not. Overall the table does not indicate improvement between distance types or sparse PCA vs vanilla PCA. That being said, based on the formula applied in HW6, there seems to be a mathematical improvement when moving to sparse PCA.
+
+
+```{r, eval=FALSE, echo=FALSE}
+#take away eval
 par(mfrow=c(1,2))
 colors <- rep(NA, length=1000)
 colors[which(cell_types == "astrocytes_ependymal")] = "black"
@@ -202,26 +208,16 @@ plot(expr_spca[, 1], expr_spca[, 2], col=colors, pch=19, main = "Visualizing dat
                                                           ylab = "Second principal component")
 ```
 
-Using Sparce PCA yields better results compared to the clustering seen in 1B and 1C. Since the features are correlated with eachother, sPCA is beneficial by providing high factor loadings. The result is the opposite from what we have seen, where the data points are possible too sparce and does not cluster- rather than clustering too close and being indistingishable from eachother.
+Now viewing the classification plot when using sparse PCA, there does seem to be an improvement from before. The most noticable aspect is the black group (astrocytes_ependymal) clearly being separated from the green (interneurons). Other than that, the orange, purple, and green are still distinct. The blue (microglia) group is still very scattered and not clustered at all. However, that may again be due to its small sample size. Interestingly, the red (endothelial-mural) and yellow (pyramidal SS) groups look like they are clustered, but are hidden behind the orange clusters. In any case, it does not appear that the three groups have a great separation from each other.
 
-On the other hand, the matrix and misclustering rate is still not great- the matrix shows cluster 3 containing two cell types. The misclustering rate is 19.4%, higher than previously seen.
-
-
-
-
-
-# XGBoost Classification
+## XGBoost Classification
 ```{r include=FALSE}
 library(xgboost)
-```
 
-XGBoost is a powerful classification model that uses gradient boosting to outperform many other algorithms for classification. 
-
-```{r include=FALSE}
 set.seed(10)
 n = nrow(tmp)
 #labels must be [0:n)
-labels = as.integer(factor(cell_types, levels=c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS"), labels=1:7))-1
+labels = as.integer(factor(cell_types, levels=ctype_list, labels=1:7))-1
 train.index = sample(n,floor(0.75*n))
 train.data = as.matrix(expr_mat[train.index,])
 train.label = labels[train.index]
@@ -256,46 +252,13 @@ params = list(
 xgb.fit=xgb.train(
   params=params,
   data=xgb.train,
-  nrounds=20,
-  nthreads=1)
-
-# Review the final model and results
-xgb.fit
+  nrounds=20)
 ```
-
-```{r include=FALSE}
-xgb.pred = as.data.frame(predict(xgb.fit, train.data, reshape=T))
-colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
-
-# Use the predicted label with the highest probability
-xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
-xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[train.label+1]
-
-# Calculate error
-result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
-print(paste("Training Error =",sprintf("%1.2f%%", 100*result)))
-
-xgb.pred = as.data.frame(predict(xgb.fit, test.data, reshape=T))
-colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
-
-# Use the predicted label with the highest probability
-xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
-xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[test.label+1]
-
-# Calculate error
-result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
-print(paste("Testing Error =",sprintf("%1.2f%%", 100*result)))
-```
-
-We fit this XGBoost model with a learning rate of 0.001, gamma value of 3, and max depth of 5 to prevent overfitting by making the boosting process more conservative. The booster ran for 20 rounds on the training dataset using the `multi:softprob` model, which predicts probabilities that an observation falls into each of the 7 cell types. This makes use of the softmax objective function, which is described as:
-
-$$\sigma(\overrightarrow{z})_j=\frac{e^{z_j}}{\sum_{k=1}^Ke^{z_k}}$$
-
-The final accuracy of this model was quite high with a training error of 2.09% and testing error of 5.98%, which are both incredibly low. We can further visualize the model's decisions in the figure below, which shows the top 8 most important features in the model. The `Crym`, `Slc32a1`, `Mobp`, `Mbp`, and `Mef2c` genes stand out as the features that produce the highest information gain, suggesting that they are most important in determining cell type.  
 
 ![](Importance 1.png)
 
 ```{r eval=FALSE}
+#This produces the above chart, but will not be run because it does not knit properly
 xgb.plot.importance(importance_matrix=xgb.importance(model=xgb.fit),
                     top_n=8,
                     xlab="Importance (Gain)",
@@ -304,16 +267,41 @@ xgb.plot.importance(importance_matrix=xgb.importance(model=xgb.fit),
 
 ```
 
-The first XGBoost decision tree is shown below--we can see that some of the most important features are indeed used in this tree. 
+```{r include=FALSE}
+xgb.pred = as.data.frame(predict(xgb.fit, train.data, reshape=T))
+colnames(xgb.pred) = ctype_list
+
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = ctype_list[train.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Training Error =",sprintf("%1.2f%%", 100*result)))
+
+xgb.pred = as.data.frame(predict(xgb.fit, test.data, reshape=T))
+colnames(xgb.pred) = ctype_list
+
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = ctype_list[test.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Testing Error =",sprintf("%1.2f%%", 100*result)))
+```
+
+The first model we fit with basic specifications (as mentioned in the **Methods** section) produces the above importance graph, which shows the top 8 most important features in the model. The `Crym`, `Slc32a1`, `Mobp`, `Mbp`, and `Mef2c` genes stand out as the features that produce the highest information gain, suggesting that they are most important in determining cell type. This is reflected in the first XGBoost decision tree shown below, which uses some of the most important features as branching decisions.
 
 ![](Tree 1.png)
 
 ```{r eval=FALSE}
+#This produces the above tree, but will not be run because it does not knit properly
 library(DiagrammeR)
 xgb.plot.tree(model=xgb.fit,trees=1)
 ```
 
-However, despite the fact that the training and testing error are both small and have a marginal difference, the testing error is higher than the training error. In addition, the tree supports this idea that the model may be overfitting, as there seem to be a high number of splits and some that seem almost arbitrary. Thus, we may choose to add an L2 regularization term of 0.1 to smooth parameters toward 0 and avoid overfitting.
+The final accuracy of this model was quite high with a very small training error of 2.09% and testing error of 5.98%, which are both incredibly low. However, despite the fact that the training and testing error are both small and have a marginal difference, the testing error is higher than the training error. In addition, the tree supports this idea that the model may be overfitting, as there seem to be a high number of splits and some that seem almost arbitrary. Thus, we may choose to add an L2 regularization term of 0.1 to smooth parameters toward 0 and avoid overfitting.
 
 ```{r echo=FALSE, message=FALSE}
 # Train the XGBoost classifer
@@ -321,44 +309,15 @@ xgb.fit=xgb.train(
   params=params,
   data=xgb.train,
   nrounds=20,
-  nthreads=1,
   lambda=0.1)
-
-# Review the final model and results
-xgb.fit
 ```
 
-```{r include=FALSE}
-xgb.pred = as.data.frame(predict(xgb.fit, train.data, reshape=T))
-colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
-
-# Use the predicted label with the highest probability
-xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
-xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[train.label+1]
-
-# Calculate error
-result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
-print(paste("Training Error =",sprintf("%1.2f%%", 100*result)))
-
-xgb.pred = as.data.frame(predict(xgb.fit, test.data, reshape=T))
-colnames(xgb.pred) = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")
-
-# Use the predicted label with the highest probability
-xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
-xgb.pred$label = c("astrocytes_ependymal", "endothelial-mural", "interneurons", "microglia","oligodendrocytes", "pyramidal CA1", "pyramidal SS")[test.label+1]
-
-# Calculate error
-result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
-print(paste("Testing Error =",sprintf("%1.2f%%", 100*result)))
-```
-
-Interestingly, including L2 regularization produced a more significant difference between training and testing error--we see that training error is now 1.46% whereas testing error is 5.98%. While this regularization attempt has failed, it is nonetheless interesting to analyze the differences between the two models.
-
-Visualizing the most important features, we observe that some of the top 8 have changed between the two models. This may be because some features that are included at many lower splits which would provide more information are now penalized, thereby reducing their importance in the regularized model.
+Visualizing the most important features, we observe that some of the top 8 have changed between the two models. For instance, the `X3110035E14Rik` gene stands out as one that has now made the top 8 features and has a funny name. This may be because some features that are included at many lower splits which would provide more information are now penalized, thereby reducing their importance in the regularized model. That being said, 6 of the same genes are still in the top 8, such as `Mobp` and `Slc32a1`, with `Crym` being the most important feature across both models.
 
 ![](Importance 2.png)
 
 ```{r eval=FALSE}
+#This produces the above chart, but will not be run because it does not knit properly
 xgb.plot.importance(importance_matrix=xgb.importance(model=xgb.fit),
                     top_n=8,
                     xlab="Importance (Gain)",
@@ -372,6 +331,75 @@ The first decision tree, as shown below, is also interesting--the number of spli
 ![](Tree 2.png)
 
 ```{r eval=FALSE}
-library(DiagrammeR)
+#This produces the above tree, but will not be run because it does not knit properly
 xgb.plot.tree(model=xgb.fit,trees=1)
 ```
+
+
+```{r include=FALSE}
+xgb.pred = as.data.frame(predict(xgb.fit, train.data, reshape=T))
+colnames(xgb.pred) = ctype_list
+
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = ctype_list[train.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Training Error =",sprintf("%1.2f%%", 100*result)))
+
+xgb.pred = as.data.frame(predict(xgb.fit, test.data, reshape=T))
+colnames(xgb.pred) = ctype_list
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = ctype_list[test.label+1]
+
+# Calculate error
+result = sum(xgb.pred$prediction!=xgb.pred$label)/nrow(xgb.pred)
+print(paste("Testing Error =",sprintf("%1.2f%%", 100*result)))
+```
+
+Interestingly, including L2 regularization produced a more significant difference between training and testing error--we see that training error is now 1.46% whereas testing error is 5.98%. This means adding L2 regularization actually seemed to increase the out-of-sample bias, but the small differences in error may be attributable to the random 75-25 train-test split. While this regularization attempt has failed, it is nonetheless interesting to analyze the differences between the two models.
+
+# Discussion
+From the XGBoost models, we saw that the most important features across both models were `Crym`, `Mobp`, `Slc32a1`, `Mbp`, `Mef2`, `Itm2a`, consistently appearing in the top 8 most important features. These genes, in further detail, are:
+
+Crym: Crystallin Mu
+
+Mobp: Myelin Associated Oligodendrocyte Basic Protein
+
+Slc32a1: Solute Carrier Family 32 Member 1
+
+Mbp: Myelin Basic Protein
+
+Mef2: Myocyte Enhancer Factor 2
+
+Itm2a: Integral Membrane Protein 2A
+
+While at first glance there does not seem to be much association between these genes, we identify that many of them are related to the production of integral membrane proteins. Of these, two are associated with myelin, which is an insulating layer that forms around nerve cells. This may be related to the fact that the mouse cells were all sampled from mouse brains, so the most important differing factors may be associated with cells functions that are specialized for the brain, such as the conduction or maintenance of the central nervous system. This may have important implications for future research, which may delve deeper into how these genes differ by cells. 
+
+Aside from this identification of important genes in classifying cells, we have produced a number of models for classification in this paper. Using sparse PCA, the misclassification rate is 32.8%; using XGBoost, both the regularized and non-regularized models have test error rates of around 5%. Thus, we can reasonably conclude that XGBoost may be the more appropriate model for classifying mouse brain cells based on the dataset. 
+
+If given more time, we would have liked to conduct cross validation in the XGBoost modelling to select more optimal factors such as `gamma` or tree size. As noted in the **Results** section, our attempt to conduct L2 regularization did not produce notably significant results, so other measures like constraining the size of the decision trees may be attempted to avoid overfitting. Additionally, we would have liked to conduct bootstrapping or resample more data to provide more valid results. Note specifically that the data contained 3005 cell observations across 1000 genes, meaning there were only 3 times more observations than features. While PCA automatically reduces the number of dimensions, models like XGBoost may suffer due to the closeness in dimensionality. Hence, bootstrapping or resampling for more data may improve the validity of our findings. 
+
+# Methods
+## KMeans Clustering
+
+To start, the expression matrix was preprocessed by performing three steps. First, each value was normalized through rescaling such that the sum of all scales add up to $10^4$. This value is arbitrary but a consistent value is needed for normalization purposes such that analyses between different distance formulas and sparse vs. naive runs can be compared. For every vector $y_i$, the normalizing step performs $10^4* \frac{y_i}{\sum_{j=1}^Dy_j}$ for all $i$ from 1 to $D$. Next, each cell from the previous step will be log transformed via the transformation $log_2(x + 1)$. And lastly, each value will be scaled such that each gene (matrix column) has a mean of 0, and a standard deviation of 1, which effectively normalizes the gene counts. 
+
+The output of the processing will replace the values of the original matrix and further visualization and principal component analysis can be done on this result matrix.
+
+## XGBoost
+
+XGBoost is a powerful classification model that uses gradient boosting to outperform many other algorithms for classification. 
+
+We fit our XGBoost models with a learning rate of 0.001, gamma value of 3, and max depth of 5 to prevent overfitting by making the boosting process more conservative. The booster ran for 20 rounds on the training dataset using the `multi:softprob` model, which predicts probabilities that an observation falls into each of the 7 cell types. This makes use of the softmax objective function, which is described as:
+
+$$\sigma(\overrightarrow{z})_j=\frac{e^{z_j}}{\sum_{k=1}^Ke^{z_k}}$$
+
+As aforementioned, the L2 regularized version of the XGBoost model simply added an L2 lambda term of 0.1 to shrink the coefficients and prevent overfitting.
+
+
+## Note on coding
+Please note that some elements of the code created issues when knitting, and therefore we have created images of the plots and inserted them along with code set with `eval=FALSE` to avoid these issues. 
+
